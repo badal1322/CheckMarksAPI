@@ -32,6 +32,10 @@ async def extract_mcq(file: UploadFile = File(...)):
         
         return {"mcq_data": result, "filename": file.filename}
     
+    except Exception as e:
+        # Add error handling to provide more useful error messages
+        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+    
     finally:
         # Clean up the temp file
         if os.path.exists(temp_file.name):
@@ -60,6 +64,10 @@ async def extract_sa(file: UploadFile = File(...)):
         result = sa_data.to_dict(orient='records')
         
         return {"sa_data": result, "filename": file.filename}
+    
+    except Exception as e:
+        # Add error handling to provide more useful error messages
+        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
     
     finally:
         # Clean up the temp file
