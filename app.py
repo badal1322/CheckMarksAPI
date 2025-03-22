@@ -101,17 +101,13 @@ async def extract_mcq(file: UploadFile = File(...), answer_key_path: str = "answ
             os.unlink(temp_file.name)
 
 @app.post("/extract/sa", response_class=JSONResponse)
-async def extract_sa(file: UploadFile = File(...), answer_key_path: str = "answer_key.json"):
+async def extract_sa(file: UploadFile = File(...)):
     """
-    Extract Short Answer Questions from a PDF file and calculate scores
+    Extract Short Answer Questions from a PDF file
     """
     # Validate file is a PDF
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
-    
-    # Validate answer key exists
-    if not os.path.exists(answer_key_path):
-        raise HTTPException(status_code=400, detail="Answer key file not found")
     
     # Save uploaded file temporarily
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
@@ -123,88 +119,17 @@ async def extract_sa(file: UploadFile = File(...), answer_key_path: str = "answe
         # Process the PDF using the existing model
         sa_data = extract_sa_from_pdf(temp_file.name)
         
-        # Load answer key
-        with open(answer_key_path, 'r') as f:
-            answer_key = json.loads(f.read())
+        # Convert to JSON-serializable format
+        result = sa_data.to_dict(orient='records')
         
-        # Convert answer key to dictionary for easier lookup
-        answer_key_dict = {item["question_id"]: item["correct_option_id"] for item in answer_key}
-        
-        # Initialize counters
-        correct_count = 0
-        incorrect_count = 0
-        unattempted_count = 0
-        total_score = 0
-        question_details = []
-
-        # Debug total questions
-        print(f"Total SA questions found: {len(sa_data)}")
-        
-        # Compare student answers with answer key
-        for _, row in sa_data.iterrows():
-            question_id = str(row.get("question_id"))
-            given_answer = str(row.get("answer")).strip()
-            
-            # Skip if question not in answer key
-            if question_id not in answer_key_dict:
-                continue
-            
-            correct_answer = str(answer_key_dict[question_id]).strip()
-            
-            # Create question detail
-            question_detail = {
-                "question_id": question_id,
-                "given_answer": given_answer,
-                "correct_answer": correct_answer
-            }
-            
-            # Debug print current question
-            print(f"Processing Q{question_id}: Given='{given_answer}' vs Correct='{correct_answer}'")
-            
-            # Check if NULL or empty answer
-            if given_answer.upper() == "NULL" or not given_answer:
-                unattempted_count += 1
-                question_detail["status"] = "unattempted"
-                question_detail["points"] = 0
-            
-            # Check exact match with correct answer
-            elif given_answer == correct_answer:
-                correct_count += 1
-                total_score += 4
-                question_detail["status"] = "correct"
-                question_detail["points"] = 4
-            
-            # Answer doesn't match
-            else:
-                incorrect_count += 1
-                total_score -= 1
-                question_detail["status"] = "incorrect"
-                question_detail["points"] = -1
-            
-            question_details.append(question_detail)
-            
-            # Debug print running totals
-            print(f"Running totals - Correct: {correct_count}, Incorrect: {incorrect_count}, Unattempted: {unattempted_count}")
-
-        # Return response with detailed counts
-        return {
-            "filename": file.filename,
-            "score_summary": {
-                "correct_questions": correct_count,
-                "incorrect_questions": incorrect_count,
-                "unattempted_questions": unattempted_count,
-                "total_questions": correct_count + incorrect_count + unattempted_count,
-                "total_score": total_score,
-                "scoring_scheme": "+4 correct, -1 incorrect, 0 unattempted"
-            },
-            "question_details": question_details,
-            "sa_data": sa_data.to_dict(orient='records')
-        }
-
+        return {"sa_data": result, "filename": file.filename}
+    
     except Exception as e:
+        # Add error handling to provide more useful error messages
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
     
     finally:
+        # Clean up the temp file
         if os.path.exists(temp_file.name):
             os.unlink(temp_file.name)
 
@@ -213,4 +138,4 @@ async def root():
     return {"message": "Welcome to the PDF Question Extractor API. Use /extract/mcq or /extract/sa endpoints."}
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True) 

@@ -1,45 +1,112 @@
-import re
-import csv
-import pdfplumber
+from fastapi import APIRouter, HTTPException, UploadFile, File
+import json
+import tempfile
+from models import extract_sa_from_pdf
 
-# Define the PDF file path
-pdf_path = "/content/sample.pdf"
-output_csv_path = "/content/sample.csv"
+sa_router = APIRouter()
 
-# Function to extract text from PDF
-def extract_text_from_pdf(pdf_path):
-    extracted_text = ""
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            page_text = page.extract_text()
-            if page_text:
-                extracted_text += page_text + "\n"
-    return extracted_text.split("\n")  # Return as a list of lines
+# Load answer key
+with open("answer_key.json", "r") as file:
+    answer_key = json.load(file)
 
-# Extract text lines from PDF
-text_lines = extract_text_from_pdf(pdf_path)
+# Convert answer key to a dictionary for faster lookup
+answer_dict = {q["question_id"]: q["correct_option_id"] for q in answer_key}
 
-# Extract numerical values after "Given" along with Question ID
-given_values = []
-question_id = None
+def match_answer(user_answer, correct_answer):
+    """
+    Matches answers, considering case insensitivity and numeric conversion.
+    """
+    if correct_answer in ["DROP", ""]:  # Ignore invalid answers
+        return False
 
-for i, line in enumerate(text_lines):
-    match = re.search(r"Given(\d+)?", line)
-    if match:
-        value = match.group(1) if match.group(1) else "NULL"
-        # Find the next question ID
-        for j in range(i + 1, len(text_lines)):
-            qid_match = re.search(r"Question ID :(\d+)", text_lines[j])
-            if qid_match:
-                question_id = qid_match.group(1)
-                break
-        given_values.append((question_id, value))
+    try:
+        return float(user_answer) == float(correct_answer)
+    except ValueError:
+        return user_answer.strip().lower() == correct_answer.strip().lower()
 
-# Write extracted values to a CSV file
-with open(output_csv_path, "w", newline="", encoding="utf-8") as csv_file:
-    writer = csv.writer(csv_file)
-    writer.writerow(["Question ID", "Extracted Number"])  # Header row
-    for qid, value in given_values:
-        writer.writerow([qid, value])
+@sa_router.post("/extract/sa")
+async def evaluate_sa(file: UploadFile = File(...)):
+    """
+    Extract Short Answer Questions from a PDF file and calculate scores.
+    Marking scheme:
+    - Correct answer: +4 marks
+    - Incorrect answer: -1 mark
+    - Unattempted: 0 marks
+    """
+    # Validate file is a PDF
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
 
-print(f"CSV file saved at: {output_csv_path}")
+    # Save uploaded file temporarily
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+    try:
+        contents = await file.read()
+        temp_file.write(contents)
+        temp_file.close()
+
+        # Process the PDF
+        sa_data = extract_sa_from_pdf(temp_file.name)
+
+        total_score = 0
+        correct_count = 0
+        incorrect_count = 0
+        skipped_count = 0
+        results = []
+
+        # Process each question
+        for _, row in sa_data.iterrows():
+            q_id = str(row.get("question_id"))
+            given_answer = str(row.get("answer")).strip()
+
+            # Skip questions not in answer key
+            if q_id not in answer_dict:
+                continue
+
+            correct_answer = str(answer_dict.get(q_id)).strip()
+
+            # Create detailed result for this question
+            result = {
+                "type": "sa",
+                "question_id": q_id,
+                "given_answer": given_answer,
+                "correct_answer": correct_answer,
+                "status": "",
+                "points": 0
+            }
+
+            # Check answer status
+            if given_answer.upper() == "NULL" or not given_answer:
+                skipped_count += 1
+                result["status"] = "Not Answered"
+            elif given_answer == correct_answer:
+                correct_count += 1
+                total_score += 4
+                result["status"] = "Correct"
+                result["points"] = 4
+            else:
+                incorrect_count += 1
+                total_score -= 1
+                result["status"] = "Incorrect"
+                result["points"] = -1
+
+            results.append(result)
+
+        # Return formatted response matching MCQ format
+        return {
+            "sa_data": results,
+            "filename": file.filename,
+            "score_summary": {
+                "correct_questions": correct_count,
+                "incorrect_questions": incorrect_count,
+                "skipped_questions": skipped_count,
+                "total_questions": correct_count + incorrect_count + skipped_count,
+                "total_score": total_score,
+                "scoring_system": "+4 for correct, -1 for incorrect, 0 for skipped"
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+    finally:
+        if temp_file.name and os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
