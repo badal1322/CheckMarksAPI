@@ -118,6 +118,8 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
 @app.post("/extract/sa", response_class=JSONResponse)
 async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
     try:
+        print(f"Processing SA request - File: {file.filename}, Date: {date}")  # Debug log
+
         if not file.filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
 
@@ -126,75 +128,102 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
             raise HTTPException(status_code=400, detail="Invalid date format. Expected DD_MM_YY")
 
         # Process file in memory
-        pdf_bytes = await process_file_in_memory(file)
+        try:
+            pdf_bytes = await process_file_in_memory(file)
+            print("File loaded into memory successfully")  # Debug log
+        except Exception as e:
+            print(f"Error loading file into memory: {str(e)}")  # Debug log
+            raise HTTPException(status_code=500, detail=f"Error loading file: {str(e)}")
         
         # Load answer key
-        answer_key_path = os.path.join("AnswerKey", f"{date}.json")
-        if not os.path.exists(answer_key_path):
-            raise HTTPException(status_code=404, detail=f"Answer key not found for date: {date}")
+        try:
+            answer_key_path = os.path.join("AnswerKey", f"{date}.json")
+            print(f"Looking for answer key at: {answer_key_path}")  # Debug log
+            
+            if not os.path.exists(answer_key_path):
+                raise HTTPException(status_code=404, detail=f"Answer key not found for date: {date}")
 
-        with open(answer_key_path, 'r') as f:
-            answer_key = json.load(f)
+            with open(answer_key_path, 'r') as f:
+                answer_key = json.load(f)
+                print(f"Loaded answer key with {len(answer_key)} entries")  # Debug log
+        except json.JSONDecodeError as e:
+            print(f"Error parsing answer key: {str(e)}")  # Debug log
+            raise HTTPException(status_code=500, detail=f"Invalid answer key format: {str(e)}")
+        except Exception as e:
+            print(f"Error loading answer key: {str(e)}")  # Debug log
+            raise HTTPException(status_code=500, detail=f"Error loading answer key: {str(e)}")
 
-        # Extract SA data using BytesIO
-        sa_data = await asyncio.to_thread(extract_sa_from_pdf, pdf_bytes)
+        # Extract SA data
+        try:
+            sa_data = await asyncio.to_thread(extract_sa_from_pdf, pdf_bytes)
+            print(f"Extracted SA data with shape: {sa_data.shape}")  # Debug log
+        except Exception as e:
+            print(f"Error extracting SA data: {str(e)}")  # Debug log
+            raise HTTPException(status_code=500, detail=f"Error extracting data from PDF: {str(e)}")
 
         # Process SA answers
-        answer_key_dict = {item["id"]: item["correct_option"] for item in answer_key}
-        results = []
-        total_score = correct_count = incorrect_count = skipped_count = 0
+        try:
+            answer_key_dict = {str(item["id"]): str(item["correct_option"]) for item in answer_key}
+            results = []
+            total_score = correct_count = incorrect_count = skipped_count = 0
 
-        for _, row in sa_data.iterrows():
-            question_id = str(row.get("question_id"))
-            given_answer = str(row.get("answer", "")).strip()
+            for _, row in sa_data.iterrows():
+                question_id = str(row.get("question_id"))
+                given_answer = str(row.get("answer", "")).strip()
 
-            if question_id not in answer_key_dict:
-                continue
+                print(f"Processing question {question_id} with answer: {given_answer}")  # Debug log
 
-            correct_answer = str(answer_key_dict[question_id])
+                if question_id not in answer_key_dict:
+                    print(f"Question ID {question_id} not found in answer key")  # Debug log
+                    continue
 
-            if not given_answer or given_answer.upper() == "NULL":
-                skipped_count += 1
-                status = "Not Answered"
-                points = 0
-            elif given_answer == correct_answer:
-                correct_count += 1
-                total_score += 4
-                status = "Correct"
-                points = 4
-            else:
-                incorrect_count += 1
-                total_score -= 1
-                status = "Incorrect"
-                points = -1
+                correct_answer = answer_key_dict[question_id]
 
-            results.append({
-                "question_id": question_id,
-                "given_answer": given_answer,
-                "correct_answer": correct_answer,
-                "status": status,
-                "points": points
-            })
+                if not given_answer or given_answer.upper() == "NULL":
+                    skipped_count += 1
+                    status = "Not Answered"
+                    points = 0
+                elif given_answer.lower() == correct_answer.lower():  # Case-insensitive comparison
+                    correct_count += 1
+                    total_score += 4
+                    status = "Correct"
+                    points = 4
+                else:
+                    incorrect_count += 1
+                    total_score -= 1
+                    status = "Incorrect"
+                    points = -1
 
-        return {
-            "sa_data": results,
-            "filename": file.filename,
-            "score_summary": {
-                "correct_questions": correct_count,
-                "incorrect_questions": incorrect_count,
-                "skipped_questions": skipped_count,
-                "total_questions": correct_count + incorrect_count + skipped_count,
-                "total_score": total_score,
-                "scoring_system": "+4 for correct, -1 for incorrect, 0 for skipped"
+                results.append({
+                    "question_id": question_id,
+                    "given_answer": given_answer,
+                    "correct_answer": correct_answer,
+                    "status": status,
+                    "points": points
+                })
+
+            return {
+                "sa_data": results,
+                "filename": file.filename,
+                "score_summary": {
+                    "correct_questions": correct_count,
+                    "incorrect_questions": incorrect_count,
+                    "skipped_questions": skipped_count,
+                    "total_questions": correct_count + incorrect_count + skipped_count,
+                    "total_score": total_score,
+                    "scoring_system": "+4 for correct, -1 for incorrect, 0 for skipped"
+                }
             }
-        }
 
+        except Exception as e:
+            print(f"Error processing answers: {str(e)}")  # Debug log
+            raise HTTPException(status_code=500, detail=f"Error processing answers: {str(e)}")
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
-        print(f"Error processing SA: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
-    finally:
-        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        print(f"Unexpected error in SA endpoint: {str(e)}")  # Debug log
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 @app.get("/")
