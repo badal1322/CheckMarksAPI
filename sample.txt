@@ -1,0 +1,74 @@
+import { useState } from "react";
+import axios from "axios";
+
+const FileUpload = () => {
+  const [file, setFile] = useState(null);
+  const [userId, setUserId] = useState("67bf4fbccd7796becb5e7c95");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const handleFileChange = (event) => {
+    setFile(event.target.files[0]);
+  };
+
+  const handleUpload = async () => {
+    if (!file) return setMessage("Please select a file.");
+    if (!userId) return setMessage("Please enter User ID.");
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("userid", userId);
+
+    try {
+      setLoading(true);
+      setMessage("");
+      const response = await axios.post("http://localhost:3000/upload/marks", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setMessage("File uploaded successfully! Extracted text saved.");
+      console.log("Extracted Text:", response.data);
+    } catch (error) {
+      console.error("Upload error:", error);
+      setMessage("Upload failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-6">
+      <div className="bg-white p-8 rounded-2xl shadow-lg w-full max-w-md">
+        <h2 className="text-2xl font-semibold text-gray-700 text-center">Upload Your File</h2>
+        <div className="mt-4">
+          <input 
+            type="file" 
+            onChange={handleFileChange} 
+            className="w-full p-2 border rounded-lg cursor-pointer" 
+          />
+        </div>
+        <div className="mt-4">
+          <input
+            type="text"
+            value={userId}
+            disabled
+            className="w-full p-2 border rounded-lg bg-gray-100 text-gray-500"
+          />
+        </div>
+        <button
+          onClick={handleUpload}
+          className="mt-4 w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition duration-200 disabled:bg-gray-300"
+          disabled={loading}
+        >
+          {loading ? "Uploading..." : "Upload"}
+        </button>
+        {message && (
+          <p className={`mt-4 text-center ${message.includes("successfully") ? "text-green-600" : "text-red-600"}`}>
+            {message}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default FileUpload;
