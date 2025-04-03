@@ -3,6 +3,7 @@ import pdfplumber
 import re
 import logging
 import tempfile
+from io import BytesIO
 # Import your existing model code/functions here
 # For example:
 # from mcq_extractor import extract_mcq
@@ -51,6 +52,41 @@ def extract_mcq_from_pdf(file_path):
             df[col] = ""
     
     # Return the dataframe
+    return df
+
+def extract_mcq_from_pdf(pdf_bytes: BytesIO):
+    """
+    Extract Multiple Choice Questions from a PDF file using the JEEExamParser
+    
+    Args:
+        pdf_bytes (BytesIO): PDF file as bytes in memory
+    
+    Returns:
+        pandas.DataFrame: DataFrame containing the extracted MCQs
+    """
+    logger.info("Processing PDF for MCQs from memory")
+    
+    # Use the JEEExamParser with BytesIO
+    parser = JEEExamParser(pdf_bytes)
+    exam_data = parser.parse_exam_pdf()
+    
+    if not exam_data:
+        columns = ["type", "question_id", "option_1_id", "option_2_id",
+                   "option_3_id", "option_4_id", "status", "chosen_option",
+                   "chosen_option_id", "given_answer"]
+        return pd.DataFrame(columns=columns)
+    
+    # Convert exam_data to DataFrame
+    df = pd.DataFrame(exam_data)
+    
+    # Ensure all expected columns exist
+    columns = ["type", "question_id", "option_1_id", "option_2_id",
+               "option_3_id", "option_4_id", "status", "chosen_option",
+               "chosen_option_id", "given_answer"]
+    for col in columns:
+        if col not in df.columns:
+            df[col] = ""
+    
     return df
 
 def extract_sa_from_pdf(file_path):
@@ -106,19 +142,18 @@ def extract_text_from_pdf(pdf_path):
 
 # JEEExamParser from MCQ.py
 class JEEExamParser:
-    """A class to parse JEE exam response PDFs and convert them to CSV format."""
+    """A class to parse JEE exam response PDFs."""
 
-    def __init__(self, pdf_path: str, output_csv: str):
-        """Initialize with path to PDF file and output CSV path."""
-        self.pdf_path = pdf_path
-        self.output_csv = output_csv
+    def __init__(self, pdf_bytes: BytesIO):
+        """Initialize with PDF bytes."""
+        self.pdf_bytes = pdf_bytes
         self.exam_data = []
 
     def extract_text_from_pdf(self) -> str:
         """Extract all text from the PDF."""
         full_text = ""
         try:
-            with pdfplumber.open(self.pdf_path) as pdf:
+            with pdfplumber.open(self.pdf_bytes) as pdf:
                 for page_num, page in enumerate(pdf.pages, 1):
                     page_text = page.extract_text()
                     if page_text:
@@ -210,7 +245,7 @@ class JEEExamParser:
 
     def parse_exam_pdf(self):
         """Parse the entire PDF and extract all question data."""
-        logger.info(f"Parsing PDF: {self.pdf_path}")
+        logger.info(f"Parsing PDF")
 
         full_text = self.extract_text_from_pdf()
         if not full_text:
@@ -247,4 +282,4 @@ class JEEExamParser:
             return True
         except Exception as e:
             logger.error(f"Error exporting to CSV: {e}")
-            return False 
+            return False
