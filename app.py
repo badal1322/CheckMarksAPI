@@ -1,3 +1,4 @@
+from io import BytesIO
 import os
 import json
 import asyncio
@@ -25,6 +26,12 @@ async def save_temp_file(file: UploadFile) -> str:
         raise HTTPException(status_code=500, detail=f"Error saving file: {str(e)}")
 
 
+async def process_file_in_memory(file: UploadFile) -> BytesIO:
+    """Process uploaded file in memory without saving to disk"""
+    contents = await file.read()
+    return BytesIO(contents)
+
+
 @app.post("/extract/mcq", response_class=JSONResponse)
 async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
     try:
@@ -48,10 +55,11 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
         if not os.path.exists(answer_key_path):
             raise HTTPException(status_code=404, detail=f"Answer key file not found: {answer_key_path}")
 
-        temp_file_path = await save_temp_file(file)
+        # Process file in memory
+        pdf_bytes = await process_file_in_memory(file)
 
-        # Extract MCQ data from the PDF
-        mcq_data = await asyncio.to_thread(extract_mcq_from_pdf, temp_file_path)
+        # Extract MCQ data using BytesIO
+        mcq_data = await asyncio.to_thread(extract_mcq_from_pdf, pdf_bytes)
         print(f"Extracted MCQ data shape: {mcq_data.shape}")  # Debug log
 
         # Load and validate answer key
@@ -105,71 +113,42 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
     except Exception as e:
         print(f"Error processing MCQ: {str(e)}")  # Debug log
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
-    finally:
-        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
 
 
 @app.post("/extract/sa", response_class=JSONResponse)
 async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
-    """
-    Extract Short Answer Questions from a PDF file.
-    The answer key is dynamically selected based on the provided date.
-    """
     try:
-        print(f"Received date in SA endpoint: {date}")  # Debug log
-        
         if not file.filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
 
-        # Validate date format (DD_MM_YY)
+        # Validate date format
         if not date or not date.replace('_', '').isdigit() or len(date.split('_')) != 3:
-            raise HTTPException(status_code=400, detail="Invalid date format. Expected DD_MM_YY (e.g., 04_04_24)")
+            raise HTTPException(status_code=400, detail="Invalid date format. Expected DD_MM_YY")
 
-        answer_key_filename = f"{date}.json"
-        print(f"Looking for answer key: {answer_key_filename}")  # Debug log
-
-        # Construct the path to the answer key file
-        answer_key_folder = "AnswerKey"
-        answer_key_path = os.path.join(answer_key_folder, answer_key_filename)
-        print(f"Full answer key path: {answer_key_path}")  # Debug log
-
+        # Process file in memory
+        pdf_bytes = await process_file_in_memory(file)
+        
+        # Load answer key
+        answer_key_path = os.path.join("AnswerKey", f"{date}.json")
         if not os.path.exists(answer_key_path):
-            raise HTTPException(status_code=404, detail=f"Answer key file not found: {answer_key_path}")
+            raise HTTPException(status_code=404, detail=f"Answer key not found for date: {date}")
 
-        temp_file_path = await save_temp_file(file)
+        with open(answer_key_path, 'r') as f:
+            answer_key = json.load(f)
 
-        # Extract SA data from the PDF
-        sa_data = await asyncio.to_thread(extract_sa_from_pdf, temp_file_path)
-        print(f"Extracted SA data shape: {sa_data.shape}")  # Debug log
+        # Extract SA data using BytesIO
+        sa_data = await asyncio.to_thread(extract_sa_from_pdf, pdf_bytes)
 
-        # Load and validate answer key
-        try:
-            with open(answer_key_path, "r") as f:
-                answer_key = json.load(f)
-                print(f"Loaded answer key with {len(answer_key)} entries")  # Debug log
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail=f"Invalid answer key JSON: {str(e)}")
-
-        # Check answer key structure
-        if not all("id" in item and "correct_option" in item for item in answer_key):
-            raise HTTPException(status_code=500, detail="Invalid answer key structure")
-
-        # Create answer key dictionary with proper keys
+        # Process SA answers
         answer_key_dict = {item["id"]: item["correct_option"] for item in answer_key}
-
-        total_score = correct_count = incorrect_count = skipped_count = 0
         results = []
+        total_score = correct_count = incorrect_count = skipped_count = 0
 
-        # Process each SA question
         for _, row in sa_data.iterrows():
-            question_id = str(row.get("question_id"))  # Convert to string for comparison
+            question_id = str(row.get("question_id"))
             given_answer = str(row.get("answer", "")).strip()
 
-            print(f"Processing question {question_id} with answer {given_answer}")  # Debug log
-
             if question_id not in answer_key_dict:
-                print(f"Question ID {question_id} not found in answer key")  # Debug log
                 continue
 
             correct_answer = str(answer_key_dict[question_id])
@@ -211,7 +190,7 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
         }
 
     except Exception as e:
-        print(f"Error processing SA: {str(e)}")  # Debug log
+        print(f"Error processing SA: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
     finally:
         if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
