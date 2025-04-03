@@ -156,7 +156,7 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
         # Extract SA data
         try:
             sa_data = await asyncio.to_thread(extract_sa_from_pdf, pdf_bytes)
-            print(f"Extracted SA data with shape: {sa_data.shape}")  # Debug log
+            # print(f"Extracted SA data with shape: {sa_data.shape}")  # Debug log
         except Exception as e:
             print(f"Error extracting SA data: {str(e)}")  # Debug log
             raise HTTPException(status_code=500, detail=f"Error extracting data from PDF: {str(e)}")
@@ -171,7 +171,7 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
                 question_id = str(row.get("question_id"))
                 given_answer = str(row.get("answer", "")).strip()
 
-                print(f"Processing question {question_id} with answer: {given_answer}")  # Debug log
+                # print(f"Processing question {question_id} with answer: {given_answer}")  # Debug log
 
                 if question_id not in answer_key_dict:
                     print(f"Question ID {question_id} not found in answer key")  # Debug log
