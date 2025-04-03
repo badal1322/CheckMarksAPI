@@ -14,18 +14,6 @@ app = FastAPI(
 )
 
 
-async def save_temp_file(file: UploadFile) -> str:
-    """Save uploaded file asynchronously and return file path"""
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    try:
-        contents = await file.read()
-        await asyncio.to_thread(temp_file.write, contents)
-        temp_file.close()
-        return temp_file.name
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error saving file: {str(e)}")
-
-
 async def process_file_in_memory(file: UploadFile) -> BytesIO:
     """Process uploaded file in memory without saving to disk"""
     contents = await file.read()
