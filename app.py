@@ -85,7 +85,7 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
                 incorrect_count += 1
                 total_score -= 1
 
-        return {
+        result = {
             "mcq_data": mcq_data.to_dict(orient="records"),
             "filename": file.filename,
             "score_summary": {
@@ -97,6 +97,8 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
                 "scoring_system": "+4 for correct, -1 for incorrect, 0 for skipped"
             }
         }
+        print("Final MCQ result:", json.dumps(result, indent=2))  # Debug log
+        return result
 
     except Exception as e:
         print(f"Error processing MCQ: {str(e)}")  # Debug log
@@ -192,7 +194,7 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
                     "points": points
                 })
 
-            return {
+            result = {
                 "sa_data": results,
                 "filename": file.filename,
                 "score_summary": {
@@ -204,6 +206,8 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
                     "scoring_system": "+4 for correct, -1 for incorrect, 0 for skipped"
                 }
             }
+            print("Final SA result:", json.dumps(result, indent=2))  # Debug log
+            return result
 
         except Exception as e:
             print(f"Error processing answers: {str(e)}")  # Debug log
