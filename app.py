@@ -24,7 +24,7 @@ async def process_file_in_memory(file: UploadFile) -> BytesIO:
 async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
     try:
         print(f"Received date in MCQ endpoint: {date}")  # Debug log
-        
+          
         if not file.filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
 
