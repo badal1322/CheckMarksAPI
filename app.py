@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 import uvicorn
 from models import extract_mcq_from_pdf, extract_sa_from_pdf
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 app = FastAPI(
     title="PDF Question Extractor API",
     description="API for extracting MCQ and Short Answer questions from PDF files"
@@ -24,7 +26,7 @@ async def process_file_in_memory(file: UploadFile) -> BytesIO:
 async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
     try:
         print(f"Received date in MCQ endpoint: {date}")  # Debug log
-          
+        
         if not file.filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
 
@@ -33,12 +35,10 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
             raise HTTPException(status_code=400, detail="Invalid date format. Expected DD_MM_YY (e.g., 04_04_24)")
             
         answer_key_filename = f"{date}.json"
+        answer_key_path = os.path.join("AnswerKey", answer_key_filename)
+        print("Current working directory:", os.getcwd())
+        print("Resolved answer key path:", answer_key_path)
         print(f"Looking for answer key: {answer_key_filename}")  # Debug log
-
-        # Construct the path to the answer key file
-        answer_key_folder = "AnswerKey"
-        answer_key_path = os.path.join(answer_key_folder, answer_key_filename)
-        print(f"Full answer key path: {answer_key_path}")  # Debug log
 
         if not os.path.exists(answer_key_path):
             raise HTTPException(status_code=404, detail=f"Answer key file not found: {answer_key_path}")
@@ -126,6 +126,8 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
         # Load answer key
         try:
             answer_key_path = os.path.join("AnswerKey", f"{date}.json")
+            print("Current working directory:", os.getcwd())
+            print("Resolved answer key path:", answer_key_path)
             print(f"Looking for answer key at: {answer_key_path}")  # Debug log
             
             if not os.path.exists(answer_key_path):
