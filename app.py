@@ -3,6 +3,7 @@ import os
 import json
 import asyncio
 import tempfile
+import requests
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -10,10 +11,21 @@ from models import extract_mcq_from_pdf, extract_sa_from_pdf
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+ANSWER_KEY_DRIVE_MAP = {
+    "04_04_24": "1-Etixccitmyanw18TkFToNu602MxsWBa"
+}
+
 app = FastAPI(
     title="PDF Question Extractor API",
     description="API for extracting MCQ and Short Answer questions from PDF files"
 )
+
+
+def get_answer_key_from_drive(file_id: str) -> dict:
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    response = requests.get(url)
+    response.raise_for_status()
+    return response.json()
 
 
 async def process_file_in_memory(file: UploadFile) -> BytesIO:
@@ -26,7 +38,9 @@ async def process_file_in_memory(file: UploadFile) -> BytesIO:
 async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
     try:
         print(f"Received date in MCQ endpoint: {date}")  # Debug log
-        
+        print(f"Received file: {file.filename}")
+        print(f"Current directory: {os.getcwd()}")
+
         if not file.filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
 
@@ -34,29 +48,16 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
         if not date or not date.replace('_', '').isdigit() or len(date.split('_')) != 3:
             raise HTTPException(status_code=400, detail="Invalid date format. Expected DD_MM_YY (e.g., 04_04_24)")
             
-        answer_key_filename = f"{date}.json"
-        answer_key_path = os.path.join("AnswerKey", answer_key_filename)
-        print("Current working directory:", os.getcwd())
-        print("Resolved answer key path:", answer_key_path)
-        print(f"Looking for answer key: {answer_key_filename}")  # Debug log
-
-        if not os.path.exists(answer_key_path):
-            raise HTTPException(status_code=404, detail=f"Answer key file not found: {answer_key_path}")
+        file_id = ANSWER_KEY_DRIVE_MAP.get(date)
+        if not file_id:
+            raise ValueError(f"No answer key mapped for date: {date}")
+        answer_key = get_answer_key_from_drive(file_id)
 
         # Process file in memory
         pdf_bytes = await process_file_in_memory(file)
 
         # Extract MCQ data using BytesIO
         mcq_data = await asyncio.to_thread(extract_mcq_from_pdf, pdf_bytes)
-        print(f"Extracted MCQ data shape: {mcq_data.shape}")  # Debug log
-
-        # Load and validate answer key
-        try:
-            with open(answer_key_path, "r") as f:
-                answer_key = json.load(f)
-                print(f"Loaded answer key with {len(answer_key)} entries")  # Debug log
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail=f"Invalid answer key JSON: {str(e)}")
 
         # Check answer key structure
         if not all("id" in item and "correct_option" in item for item in answer_key):
@@ -97,7 +98,6 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
                 "scoring_system": "+4 for correct, -1 for incorrect, 0 for skipped"
             }
         }
-        print("Final MCQ result:", json.dumps(result, indent=2))  # Debug log
         return result
 
     except Exception as e:
@@ -109,6 +109,8 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
 async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
     try:
         print(f"Processing SA request - File: {file.filename}, Date: {date}")  # Debug log
+        print(f"Received file: {file.filename}")
+        print(f"Current directory: {os.getcwd()}")
 
         if not file.filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
@@ -124,20 +126,14 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
         except Exception as e:
             print(f"Error loading file into memory: {str(e)}")  # Debug log
             raise HTTPException(status_code=500, detail=f"Error loading file: {str(e)}")
-        
+
         # Load answer key
         try:
-            answer_key_path = os.path.join("AnswerKey", f"{date}.json")
-            print("Current working directory:", os.getcwd())
-            print("Resolved answer key path:", answer_key_path)
-            print(f"Looking for answer key at: {answer_key_path}")  # Debug log
-            
-            if not os.path.exists(answer_key_path):
-                raise HTTPException(status_code=404, detail=f"Answer key not found for date: {date}")
-
-            with open(answer_key_path, 'r') as f:
-                answer_key = json.load(f)
-                print(f"Loaded answer key with {len(answer_key)} entries")  # Debug log
+            file_id = ANSWER_KEY_DRIVE_MAP.get(date)
+            if not file_id:
+                raise ValueError(f"No answer key mapped for date: {date}")
+            answer_key = get_answer_key_from_drive(file_id)
+            print(f"Loaded answer key with {len(answer_key)} entries")  # Debug log
         except json.JSONDecodeError as e:
             print(f"Error parsing answer key: {str(e)}")  # Debug log
             raise HTTPException(status_code=500, detail=f"Invalid answer key format: {str(e)}")
@@ -150,7 +146,7 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
             sa_data = await asyncio.to_thread(extract_sa_from_pdf, pdf_bytes)
             # print(f"Extracted SA data with shape: {sa_data.shape}")  # Debug log
         except Exception as e:
-            print(f"Error extracting SA data: {str(e)}")  # Debug log
+            # print(f"Error extracting SA data: {str(e)}")  # Debug log
             raise HTTPException(status_code=500, detail=f"Error extracting data from PDF: {str(e)}")
 
         # Process SA answers
@@ -166,7 +162,7 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
                 # print(f"Processing question {question_id} with answer: {given_answer}")  # Debug log
 
                 if question_id not in answer_key_dict:
-                    print(f"Question ID {question_id} not found in answer key")  # Debug log
+                    # print(f"Question ID {question_id} not found in answer key")  # Debug log
                     continue
 
                 correct_answer = answer_key_dict[question_id]
@@ -206,7 +202,6 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
                     "scoring_system": "+4 for correct, -1 for incorrect, 0 for skipped"
                 }
             }
-            print("Final SA result:", json.dumps(result, indent=2))  # Debug log
             return result
 
         except Exception as e:
