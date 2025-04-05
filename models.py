@@ -145,15 +145,23 @@ def extract_sa_from_pdf(pdf_bytes: BytesIO):
 
 def extract_text_from_pdf_bytes(pdf_bytes: BytesIO) -> list:
     """Extract text from PDF bytes and return as a list of lines."""
-    extracted_text = ""
     try:
-        with pdfplumber.open(pdf_bytes) as pdf:
+        # Reset buffer position
+        pdf_bytes.seek(0)
+        extracted_text = ""
+        
+        with pdfplumber.open(BytesIO(pdf_bytes.getvalue())) as pdf:
             for page_num, page in enumerate(pdf.pages, 1):
                 page_text = page.extract_text()
                 if page_text:
                     extracted_text += page_text + "\n"
                 logger.info(f"Processed page {page_num}/{len(pdf.pages)}")
+                
+        if not extracted_text:
+            logger.error("No text extracted from PDF")
+            return []
+            
+        return extracted_text.split("\n")
     except Exception as e:
         logger.error(f"Error extracting text from PDF: {e}")
         return []
-    return extracted_text.split("\n")

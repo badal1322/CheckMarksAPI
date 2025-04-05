@@ -2,12 +2,20 @@ from io import BytesIO
 import os
 import json
 import asyncio
-import tempfile
 import requests
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from models import extract_mcq_from_pdf, extract_sa_from_pdf
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -20,6 +28,13 @@ app = FastAPI(
     description="API for extracting MCQ and Short Answer questions from PDF files"
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def get_answer_key_from_drive(file_id: str) -> dict:
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -30,16 +45,20 @@ def get_answer_key_from_drive(file_id: str) -> dict:
 
 async def process_file_in_memory(file: UploadFile) -> BytesIO:
     """Process uploaded file in memory without saving to disk"""
-    contents = await file.read()
-    return BytesIO(contents)
+    try:
+        contents = await file.read()
+        return BytesIO(contents)
+    except Exception as e:
+        logger.error(f"Error reading file: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
 
 
 @app.post("/extract/mcq", response_class=JSONResponse)
 async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
     try:
-        print(f"Received date in MCQ endpoint: {date}")  # Debug log
-        print(f"Received file: {file.filename}")
-        print(f"Current directory: {os.getcwd()}")
+        logger.info(f"Received date in MCQ endpoint: {date}")
+        logger.info(f"Received file: {file.filename}")
+        logger.info(f"Current directory: {os.getcwd()}")
 
         if not file.filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
@@ -74,7 +93,7 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
             chosen_option_id = str(row.get("chosen_option_id")) if row.get("chosen_option_id") else ""
 
             if question_id not in answer_key_dict:
-                print(f"Question ID {question_id} not found in answer key")  # Debug log
+                logger.info(f"Question ID {question_id} not found in answer key")
                 continue
 
             if not chosen_option_id:
@@ -101,16 +120,16 @@ async def extract_mcq(file: UploadFile = File(...), date: str = Form(...)):
         return result
 
     except Exception as e:
-        print(f"Error processing MCQ: {str(e)}")  # Debug log
+        logger.error(f"Error processing MCQ: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
 
 
 @app.post("/extract/sa", response_class=JSONResponse)
 async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
     try:
-        print(f"Processing SA request - File: {file.filename}, Date: {date}")  # Debug log
-        print(f"Received file: {file.filename}")
-        print(f"Current directory: {os.getcwd()}")
+        logger.info(f"Processing SA request - File: {file.filename}, Date: {date}")
+        logger.info(f"Received file: {file.filename}")
+        logger.info(f"Current directory: {os.getcwd()}")
 
         if not file.filename.endswith(".pdf"):
             raise HTTPException(status_code=400, detail="File must be a PDF")
@@ -122,9 +141,9 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
         # Process file in memory
         try:
             pdf_bytes = await process_file_in_memory(file)
-            print("File loaded into memory successfully")  # Debug log
+            logger.info("File loaded into memory successfully")
         except Exception as e:
-            print(f"Error loading file into memory: {str(e)}")  # Debug log
+            logger.error(f"Error loading file into memory: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error loading file: {str(e)}")
 
         # Load answer key
@@ -133,20 +152,20 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
             if not file_id:
                 raise ValueError(f"No answer key mapped for date: {date}")
             answer_key = get_answer_key_from_drive(file_id)
-            print(f"Loaded answer key with {len(answer_key)} entries")  # Debug log
+            logger.info(f"Loaded answer key with {len(answer_key)} entries")
         except json.JSONDecodeError as e:
-            print(f"Error parsing answer key: {str(e)}")  # Debug log
+            logger.error(f"Error parsing answer key: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Invalid answer key format: {str(e)}")
         except Exception as e:
-            print(f"Error loading answer key: {str(e)}")  # Debug log
+            logger.error(f"Error loading answer key: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error loading answer key: {str(e)}")
 
         # Extract SA data
         try:
             sa_data = await asyncio.to_thread(extract_sa_from_pdf, pdf_bytes)
-            # print(f"Extracted SA data with shape: {sa_data.shape}")  # Debug log
+            # logger.info(f"Extracted SA data with shape: {sa_data.shape}")
         except Exception as e:
-            # print(f"Error extracting SA data: {str(e)}")  # Debug log
+            # logger.error(f"Error extracting SA data: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error extracting data from PDF: {str(e)}")
 
         # Process SA answers
@@ -159,10 +178,10 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
                 question_id = str(row.get("question_id"))
                 given_answer = str(row.get("answer", "")).strip()
 
-                # print(f"Processing question {question_id} with answer: {given_answer}")  # Debug log
+                # logger.info(f"Processing question {question_id} with answer: {given_answer}")
 
                 if question_id not in answer_key_dict:
-                    # print(f"Question ID {question_id} not found in answer key")  # Debug log
+                    # logger.info(f"Question ID {question_id} not found in answer key")
                     continue
 
                 correct_answer = answer_key_dict[question_id]
@@ -205,13 +224,13 @@ async def extract_sa(file: UploadFile = File(...), date: str = Form(...)):
             return result
 
         except Exception as e:
-            print(f"Error processing answers: {str(e)}")  # Debug log
+            logger.error(f"Error processing answers: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error processing answers: {str(e)}")
 
     except HTTPException:
         raise  # Re-raise HTTP exceptions
     except Exception as e:
-        print(f"Unexpected error in SA endpoint: {str(e)}")  # Debug log
+        logger.error(f"Unexpected error in SA endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
