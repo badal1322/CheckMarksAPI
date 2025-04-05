@@ -14,6 +14,12 @@ class JEEExamParser:
 
     def __init__(self, pdf_bytes: BytesIO):
         """Initialize with PDF bytes."""
+        # Convert to BytesIO if needed
+        if isinstance(pdf_bytes, str):
+            pdf_bytes = BytesIO(pdf_bytes.encode())
+        elif isinstance(pdf_bytes, bytes):
+            pdf_bytes = BytesIO(pdf_bytes)
+            
         self.pdf_bytes = pdf_bytes
         self.exam_data = []
 
@@ -104,9 +110,45 @@ class JEEExamParser:
         self.exam_data.sort(key=lambda x: int(x.get("question_id", "0")))
         return self.exam_data
 
+def extract_text_from_pdf_bytes(pdf_bytes: BytesIO) -> list:
+    """Extract text from PDF bytes and return as a list of lines."""
+    try:
+        # Convert to BytesIO if string is received
+        if isinstance(pdf_bytes, str):
+            pdf_bytes = BytesIO(pdf_bytes.encode())
+        elif isinstance(pdf_bytes, bytes):
+            pdf_bytes = BytesIO(pdf_bytes)
+            
+        # Reset buffer position
+        pdf_bytes.seek(0)
+        extracted_text = ""
+        
+        with pdfplumber.open(pdf_bytes) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                page_text = page.extract_text()
+                if page_text:
+                    extracted_text += page_text + "\n"
+                logger.info(f"Processed page {page_num}/{len(pdf.pages)}")
+                
+        if not extracted_text:
+            logger.error("No text extracted from PDF")
+            return []
+            
+        return extracted_text.split("\n")
+    except Exception as e:
+        logger.error(f"Error extracting text from PDF: {e}")
+        return []
+
 def extract_mcq_from_pdf(pdf_bytes: BytesIO):
     """Extract Multiple Choice Questions from a PDF file."""
     logger.info("Processing PDF for MCQs from memory")
+    
+    # Convert to BytesIO if needed
+    if isinstance(pdf_bytes, str):
+        pdf_bytes = BytesIO(pdf_bytes.encode())
+    elif isinstance(pdf_bytes, bytes):
+        pdf_bytes = BytesIO(pdf_bytes)
+        
     parser = JEEExamParser(pdf_bytes)
     exam_data = parser.parse_exam_pdf()
     
@@ -121,6 +163,13 @@ def extract_mcq_from_pdf(pdf_bytes: BytesIO):
 def extract_sa_from_pdf(pdf_bytes: BytesIO):
     """Extract Short Answer Questions from a PDF file."""
     logger.info("Processing PDF for Short Answers from memory")
+    
+    # Convert to BytesIO if needed
+    if isinstance(pdf_bytes, str):
+        pdf_bytes = BytesIO(pdf_bytes.encode())
+    elif isinstance(pdf_bytes, bytes):
+        pdf_bytes = BytesIO(pdf_bytes)
+        
     text_lines = extract_text_from_pdf_bytes(pdf_bytes)
     
     given_values = []
@@ -142,26 +191,3 @@ def extract_sa_from_pdf(pdf_bytes: BytesIO):
         df["question"] = ""
     
     return df
-
-def extract_text_from_pdf_bytes(pdf_bytes: BytesIO) -> list:
-    """Extract text from PDF bytes and return as a list of lines."""
-    try:
-        # Reset buffer position
-        pdf_bytes.seek(0)
-        extracted_text = ""
-        
-        with pdfplumber.open(BytesIO(pdf_bytes.getvalue())) as pdf:
-            for page_num, page in enumerate(pdf.pages, 1):
-                page_text = page.extract_text()
-                if page_text:
-                    extracted_text += page_text + "\n"
-                logger.info(f"Processed page {page_num}/{len(pdf.pages)}")
-                
-        if not extracted_text:
-            logger.error("No text extracted from PDF")
-            return []
-            
-        return extracted_text.split("\n")
-    except Exception as e:
-        logger.error(f"Error extracting text from PDF: {e}")
-        return []
