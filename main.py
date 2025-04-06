@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import logging
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 import uvicorn
@@ -10,24 +11,28 @@ from models import extract_mcq_from_pdf, extract_sa_from_pdf
 app = FastAPI(title="PDF Question Extractor API", 
               description="API for extracting MCQ and Short Answer questions from PDF files")
 
+logger = logging.getLogger(__name__)
+
 async def save_temp_file(file: UploadFile):
     """Save uploaded file to a temporary location asynchronously."""
+    contents = await file.read()
+    print("File signature:", contents[:10])
     temp_path = f"/tmp/{file.filename}"
     with open(temp_path, "wb") as f:
-        contents = await file.read()
         f.write(contents)
     return temp_path
 
 @app.post("/extract/mcq", response_class=JSONResponse)
 async def extract_mcq(file: UploadFile = File(...), answer_key_path: str = "answer_key.json"):
     """Extract MCQs and calculate scores."""
-    if not file.filename.endswith('.pdf'):
+    if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
     
     if not os.path.exists(answer_key_path):
         raise HTTPException(status_code=400, detail="Answer key file not found")
 
     temp_path = await save_temp_file(file)
+    file.file.seek(0)
     
     try:
         # Process the PDF asynchronously
@@ -77,15 +82,17 @@ async def extract_mcq(file: UploadFile = File(...), answer_key_path: str = "answ
             }
         }
     except Exception as e:
+        logger.error(f"Error processing PDF: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
 
 @app.post("/extract/sa", response_class=JSONResponse)
 async def extract_sa(file: UploadFile = File(...)):
     """Extract Short Answer Questions asynchronously."""
-    if not file.filename.endswith('.pdf'):
+    if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="File must be a PDF")
 
     temp_path = await save_temp_file(file)
+    file.file.seek(0)
 
     try:
         sa_data = await asyncio.to_thread(extract_sa_from_pdf, temp_path)
@@ -99,6 +106,7 @@ async def extract_sa(file: UploadFile = File(...)):
             "filename": file.filename
         }
     except Exception as e:
+        logger.error(f"Error processing PDF: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
 
 @app.get("/")
