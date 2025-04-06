@@ -17,7 +17,8 @@ async def save_temp_file(file: UploadFile):
     """Save uploaded file to a temporary location asynchronously."""
     contents = await file.read()
     print("File signature:", contents[:10])
-    temp_path = f"/tmp/{file.filename}"
+    os.makedirs("temp_uploads", exist_ok=True)
+    temp_path = os.path.join("temp_uploads", file.filename)
     with open(temp_path, "wb") as f:
         f.write(contents)
     return temp_path
